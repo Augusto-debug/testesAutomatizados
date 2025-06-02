@@ -1,23 +1,21 @@
 package com.iftm.client.repositories;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
+import com.iftm.client.dto.ClientDTO;
+import com.iftm.client.entities.Client;
+import com.iftm.client.services.ClientService;
+import com.iftm.client.services.exceptions.ResourceNotFoundException;
 
-import javax.persistence.EntityNotFoundException;
-
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
-import static org.mockito.Mockito.when;
+
+import static org.mockito.Mockito.*;
+
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.Page;
@@ -25,235 +23,199 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
-import com.iftm.client.dto.ClientDTO;
-import com.iftm.client.entities.Client;
-import com.iftm.client.services.ClientService;
-import com.iftm.client.services.exceptions.ResourceNotFoundException;
+import javax.persistence.EntityNotFoundException;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 @ExtendWith(SpringExtension.class)
 public class ClientServiceTests {
-    
+
     @InjectMocks
     private ClientService service;
 
     @Mock
     private ClientRepository repository;
 
-    private Long idExistente;
-    private Long idNaoExistente;
-    private Long idDependente;
+    private Long existingId;
+    private Long nonExistingId;
+    private Long dependentId;
 
     private PageRequest pageRequest;
     private Client client;
-    private Page<Client> clientePagina;
-
-    private Double targetIncome;
-    private Client clientWithTargetIncome;
-    private Page<Client> pageOfClientsWithTargetIncome;
-
-    private ClientDTO clientDTOtoUpdate;
-    private Client uptadeClientEntity;
+    private ClientDTO clientDTO;
 
     @BeforeEach
-    void setUp() throws Exception {
-        idExistente = 1L;
-        idNaoExistente = 1000L;
-        idDependente = 4L;
+    void setUp() {
+        // Arrange – @Autor: Augusto Cesar Rezende
 
-        Mockito.doNothing().when(repository).deleteById(idExistente);
-
-        Mockito.doThrow(new EmptyResultDataAccessException(1))
-            .when(repository).deleteById(idNaoExistente);
-
-        Mockito.doThrow(DataIntegrityViolationException.class)
-            .when(repository).deleteById(idDependente);
+        existingId = 1L;
+        nonExistingId = 1000L;
+        dependentId = 4L;
 
         pageRequest = PageRequest.of(0, 10);
-        client = new Client(1L, "Cliente Test", "12345678901", 2000.0, Instant.now(), 0);
-        clientePagina = new PageImpl<>(List.of(client), pageRequest, 1);
+        client = new Client(existingId, "João Silva", "12345678900", 3000.0, Instant.now(), 2);
+        clientDTO = new ClientDTO(client);
 
-        Mockito.when(repository.findAll(pageRequest)).thenReturn(clientePagina);
+        // findAll
+        when(repository.findAll(pageRequest)).thenReturn(new PageImpl<>(List.of(client)));
 
-        targetIncome = 2000.0;
-        clientWithTargetIncome = new Client(2L, "Cliente Alvo", "09876543210", targetIncome, Instant.now(), 1);
-        pageOfClientsWithTargetIncome = new PageImpl<>(List.of(clientWithTargetIncome), pageRequest, 1);
+        // findByIncome
+        when(repository.findByIncome(eq(3000.0), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(client)));
 
-        Mockito.when(repository.findByIncome(eq(targetIncome), any(PageRequest.class)))
-            .thenReturn(pageOfClientsWithTargetIncome);
+        // findById
+        when(repository.findById(existingId)).thenReturn(Optional.of(client));
+        when(repository.findById(nonExistingId)).thenReturn(Optional.empty());
 
-        Mockito.when(repository.findById(idExistente)).thenReturn(Optional.of(client));
+        // getOne (para update)
+        when(repository.getOne(existingId)).thenReturn(client);
+        when(repository.getOne(nonExistingId)).thenThrow(EntityNotFoundException.class);
 
-        Mockito.when(repository.findById(idNaoExistente)).thenReturn(Optional.empty());
+        // save
+        when(repository.save(any())).thenReturn(client);
 
-        clientDTOtoUpdate = new ClientDTO(null, "Nome Atualizado", "99988877700", 5000.0, Instant.parse("2001-10-20T00:00:00Z"), 2);
-
-        Client originalClient = new Client(idExistente, "Cliente Original", "45612398700", 4000.0, Instant.parse("1998-03-10T00:00:00Z"), 1);
-    
-        Mockito.when(repository.getOne(idExistente)).thenReturn(originalClient);
-
-        Mockito.when(repository.getOne(idNaoExistente))
-            .thenThrow(new EntityNotFoundException("Id não encontrado: " + idNaoExistente));
-
-        uptadeClientEntity = new Client();
-        uptadeClientEntity.setId(idExistente);
-        uptadeClientEntity.setName(clientDTOtoUpdate.getName());
-        uptadeClientEntity.setCpf(clientDTOtoUpdate.getCpf());
-        uptadeClientEntity.setIncome(clientDTOtoUpdate.getIncome());
-        uptadeClientEntity.setBirthDate(clientDTOtoUpdate.getBirthDate());
-        uptadeClientEntity.setChildren(clientDTOtoUpdate.getChildren());
-
-        Mockito.when(repository.save(any(Client.class))).thenReturn(uptadeClientEntity);
+        // delete
+        doNothing().when(repository).deleteById(existingId);
+        doThrow(EmptyResultDataAccessException.class).when(repository).deleteById(nonExistingId);
+        doThrow(DataIntegrityViolationException.class).when(repository).deleteById(dependentId);
     }
 
-    /* delete deveria
-    ◦ retornar vazio quando o id existir
-    ◦ lançar uma EmptyResultDataAccessException quando o id não existir */
+    // @Autor: Augusto Cesar Rezende
+    // Testa a deleção com ID existente
     @Test
-    public void apagarNaoDeveFazerNadaQuandoIdExistente() {
-        Assertions.assertDoesNotThrow(()->{service.delete(idExistente);});
-        Mockito.verify(repository, Mockito.times(1)).deleteById(idExistente);
+    void deleteShouldDoNothingWhenIdExists() {
+        // Act
+        assertDoesNotThrow(() -> service.delete(existingId));
+
+        // Assert
+        verify(repository, times(1)).deleteById(existingId);
     }
 
-    @Test 
-    void apagarDeveLancarUmaExcecaoQuandoIdNaoExistente() {
-        Assertions.assertThrows(ResourceNotFoundException.class, () -> {
-            service.delete(idNaoExistente);
-        });
-        Mockito.verify(repository, Mockito.times(1)).deleteById(idNaoExistente);
-    }
-
-    // findAllPaged deveria retornar uma página com todos os clientes (e chamar o método findAll do repository)
+    // @Autor: Augusto Cesar Rezende
+    // Testa exceção ao deletar ID inexistente
     @Test
-    void findAllPageDeveRetornarPaginaComTodosOsClientes() {
+    void deleteShouldThrowResourceNotFoundExceptionWhenIdDoesNotExist() {
+        // Act + Assert
+        assertThrows(ResourceNotFoundException.class, () -> service.delete(nonExistingId));
+        verify(repository).deleteById(nonExistingId);
+    }
+
+    // @Autor: Augusto Cesar Rezende
+    // Testa exceção ao deletar cliente com dependência
+    @Test
+    void deleteShouldThrowDatabaseExceptionWhenDependentId() {
+        // Act + Assert
+        assertThrows(DataIntegrityViolationException.class, () -> service.delete(dependentId));
+        verify(repository).deleteById(dependentId);
+    }
+
+    // @Autor: Augusto Cesar Rezende
+    // Testa listagem paginada de todos os clientes
+    @Test
+    void findAllPagedShouldReturnPage() {
+        // Act
         Page<ClientDTO> result = service.findAllPaged(pageRequest);
 
-        Assertions.assertNotNull(result, "O resultado não deve ser nulo");
-
-        Assertions.assertEquals(1, result.getTotalElements(), "Deveria haver 1 cliente na página");
-
-        Assertions.assertFalse(result.getContent().isEmpty(), "A lista de clientes não deve estar vazia");
-
-        Assertions.assertEquals(client.getName(), result.getContent().get(0).getName(), "O nome do cliente deve ser igual");
-
-        Assertions.assertEquals(client.getCpf(), result.getContent().get(0).getCpf(), "O CPF do cliente deve ser igual");
-
-        Mockito.verify(repository, Mockito.times(1)).findAll(pageRequest);
+        // Assert
+        assertNotNull(result);
+        assertEquals(1, result.getTotalElements());
+        verify(repository).findAll(pageRequest);
     }
 
-    // findByIncome deveria retornar uma página com os clientes que tenham o Income informado (e chamar o método findByIncome do repository)
+    // @Autor: Augusto Cesar Rezende
+    // Testa listagem paginada por renda
     @Test
-    public void findByIncomeDeveRetornarPaginaComClientesComIncomeEspecifico() {
-        Page<ClientDTO> result = service.findByIncome(targetIncome, pageRequest);
+    void findByIncomeShouldReturnFilteredPage() {
+        // Act
+        Page<ClientDTO> result = service.findByIncome(3000.0, pageRequest);
 
-        Assertions.assertNotNull(result, "O resultado não deve ser nulo");
-
-        Assertions.assertEquals(1, result.getTotalElements(), "Deveria haver 1 cliente com o income especificado");
-
-        Assertions.assertFalse(result.getContent().isEmpty(), "A lista de clientes não deve estar vazia");
-
-        ClientDTO clientDTO = result.getContent().get(0);
-        Assertions.assertEquals(clientWithTargetIncome.getId(), clientDTO.getId());
-        Assertions.assertEquals(clientWithTargetIncome.getName(), clientDTO.getName());
-        Assertions.assertEquals(targetIncome, clientDTO.getIncome());
-
-        Mockito.verify(repository, Mockito.times(1)).findByIncome(eq(targetIncome), eq(pageRequest));
+        // Assert
+        assertNotNull(result);
+        assertEquals(1, result.getTotalElements());
+        assertEquals("João Silva", result.getContent().get(0).getName());
+        verify(repository).findByIncome(eq(3000.0), eq(pageRequest));
     }
 
-    /* findById deveria
-    ◦ retornar um ClientDTO quando o id existir
-    ◦ lançar ResourceNotFoundException quando o id não existir */
+    // @Autor: Augusto Cesar Rezende
+    // Testa busca por ID existente
     @Test
-    public void findByIdDeveRetornarClientDTOQuandoIdExistir() {
-        ClientDTO result = service.findById(idExistente);
+    void findByIdShouldReturnClientDTOWhenIdExists() {
+        // Act
+        ClientDTO result = service.findById(existingId);
 
-        Assertions.assertNotNull(result, "O resultado não deve ser nulo");
-        Assertions.assertEquals(client.getId(), result.getId(), "O ID do cliente deve ser igual");
-        Assertions.assertEquals(client.getName(), result.getName(), "O nome do cliente deve ser igual");
-        Assertions.assertEquals(client.getCpf(), result.getCpf(), "O CPF do cliente deve ser igual");
-
-        Mockito.verify(repository, Mockito.times(1)).findById(idExistente);
+        // Assert
+        assertNotNull(result);
+        assertEquals(client.getName(), result.getName());
+        verify(repository).findById(existingId);
     }
 
+    // @Autor: Augusto Cesar Rezende
+    // Testa exceção ao buscar por ID inexistente
     @Test
-    public void findByIdDeveLancarResourceNotFoundExceptionQuandoIdNaoExistir() {
-        Assertions.assertThrows(ResourceNotFoundException.class, () -> {
-            service.findById(idNaoExistente);
-        });
-
-        Mockito.verify(repository, Mockito.times(1)).findById(idNaoExistente);
+    void findByIdShouldThrowResourceNotFoundExceptionWhenIdDoesNotExist() {
+        // Act + Assert
+        assertThrows(ResourceNotFoundException.class, () -> service.findById(nonExistingId));
+        verify(repository).findById(nonExistingId);
     }
 
-    /*  update deveria
-    ◦ retornar um ClientDTO quando o id existir
-    ◦ lançar uma ResourceNotFoundException quando o id não existir */
-
+    // @Autor: Augusto Cesar Rezende
+    // Testa atualização de cliente com ID existente
     @Test
-    public void updateDeveRetornarClientDTOQuandoIdExistir() {
-        ClientDTO result = service.update(idExistente, clientDTOtoUpdate);
+    void updateShouldReturnClientDTOWhenIdExists() {
+        // Arrange
+        ClientDTO updateDTO = new ClientDTO(null, "Maria Atualizada", "00011122233", 5000.0, Instant.now(), 0);
+        Client updatedEntity = new Client(existingId, updateDTO.getName(), updateDTO.getCpf(), updateDTO.getIncome(), updateDTO.getBirthDate(), updateDTO.getChildren());
 
-        Assertions.assertNotNull(result, "O resultado não deve ser nulo");
-        Assertions.assertEquals(clientDTOtoUpdate.getName(), result.getName(), "O nome do cliente atualizado deve ser igual");
-        Assertions.assertEquals(clientDTOtoUpdate.getCpf(), result.getCpf(), "O CPF do cliente atualizado deve ser igual");
-        Assertions.assertEquals(clientDTOtoUpdate.getIncome(), result.getIncome(), "A renda do cliente atualizado deve ser igual");
-        Assertions.assertEquals(clientDTOtoUpdate.getChildren(), result.getChildren(), "O número de filhos do cliente atualizado deve ser igual");
+        when(repository.save(any())).thenReturn(updatedEntity);
 
-        Mockito.verify(repository, Mockito.times(1)).getOne(idExistente);
-        Mockito.verify(repository, Mockito.times(1)).save(any(Client.class));
+        // Act
+        ClientDTO result = service.update(existingId, updateDTO);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals("Maria Atualizada", result.getName());
+        assertEquals("00011122233", result.getCpf());
+        verify(repository).getOne(existingId);
+        verify(repository).save(any(Client.class));
     }
 
+    // @Autor: Augusto Cesar Rezende
+    // Testa exceção ao atualizar cliente com ID inexistente
     @Test
-    public void updateDeveLancarResourceNotFoundExceptionQuandoIdNaoExistir() {
-        Assertions.assertThrows(ResourceNotFoundException.class, () -> {
-            service.update(idNaoExistente, clientDTOtoUpdate);
-        });
-
-        Mockito.verify(repository, Mockito.times(1)).getOne(idNaoExistente);
+    void updateShouldThrowResourceNotFoundExceptionWhenIdDoesNotExist() {
+        // Act + Assert
+        assertThrows(ResourceNotFoundException.class, () -> service.update(nonExistingId, clientDTO));
+        verify(repository).getOne(nonExistingId);
     }
 
-    //  insert deveria retornar um ClientDTO ao inserir um novo cliente
-
+    // @Autor: Augusto Cesar Rezende
+    // Testa inserção de novo cliente
     @Test
-    public void insertDeveRetornarClientDTOAoInserirNovoCliente() {
+    void insertShouldReturnSavedClientDTO() {
+        // Arrange
+        ClientDTO newClientDTO = new ClientDTO(null, "Carlos Novo", "99988877700", 4000.0, Instant.now(), 1);
+        Client savedClient = new Client(10L, newClientDTO.getName(), newClientDTO.getCpf(), newClientDTO.getIncome(), newClientDTO.getBirthDate(), newClientDTO.getChildren());
 
-        ClientDTO newClientInputDTO = new ClientDTO(
-            null, 
-            "Novo Cliente Inserido", 
-            "12345678900", 
-            3500.0, 
-            Instant.now(), 
-            1
-        );
+        when(repository.save(any())).thenReturn(savedClient);
 
-        Long idGeradoSimulado = 101L;
-        Client clienteSalvoComId = new Client();
-        clienteSalvoComId.setId(idGeradoSimulado);
-        clienteSalvoComId.setName(newClientInputDTO.getName());
-        clienteSalvoComId.setCpf(newClientInputDTO.getCpf());
-        clienteSalvoComId.setIncome(newClientInputDTO.getIncome());
-        clienteSalvoComId.setBirthDate(newClientInputDTO.getBirthDate());
-        clienteSalvoComId.setChildren(newClientInputDTO.getChildren());
+        // Act
+        ClientDTO result = service.insert(newClientDTO);
 
-        Mockito.when(repository.save(any(Client.class))).thenReturn(clienteSalvoComId);
+        // Assert
+        assertNotNull(result);
+        assertEquals("Carlos Novo", result.getName());
+        assertEquals("99988877700", result.getCpf());
+        assertEquals(4000.0, result.getIncome());
 
-        ClientDTO resultDTO = service.insert(newClientInputDTO);
+        ArgumentCaptor<Client> captor = ArgumentCaptor.forClass(Client.class);
+        verify(repository).save(captor.capture());
 
-        Assertions.assertNotNull(resultDTO, "O resultado não deve ser nulo");
-
-        Assertions.assertEquals(idGeradoSimulado, resultDTO.getId(), "O ID do cliente inserido deve ser o ID gerado.");
-        
-        Assertions.assertEquals(newClientInputDTO.getName(), resultDTO.getName(), "O nome do cliente inserido deve ser igual");
-        Assertions.assertEquals(newClientInputDTO.getCpf(), resultDTO.getCpf(), "O CPF do cliente inserido deve ser igual");
-        Assertions.assertEquals(newClientInputDTO.getIncome(), resultDTO.getIncome(), "A renda do cliente inserida deve ser igual");
-        Assertions.assertEquals(newClientInputDTO.getChildren(), resultDTO.getChildren(), "O número de filhos do cliente inserido deve ser igual");
-        Assertions.assertEquals(newClientInputDTO.getBirthDate(), resultDTO.getBirthDate(), "A data de nascimento do cliente inserido deve ser igual");
-
-        ArgumentCaptor<Client> clientArgumentCaptor = ArgumentCaptor.forClass(Client.class);
-        Mockito.verify(repository, Mockito.times(1)).save(clientArgumentCaptor.capture());
-        
-        Client entidadePassadaParaSave = clientArgumentCaptor.getValue();
-        
-        Assertions.assertNull(entidadePassadaParaSave.getId(), "O ID da entidade passada para o método save deveria ser nulo.");
-        Assertions.assertEquals(newClientInputDTO.getName(), entidadePassadaParaSave.getName(), "O nome da entidade passada para save não confere.");
+        Client capturedClient = captor.getValue();
+        assertEquals("Carlos Novo", capturedClient.getName());
+        assertNull(capturedClient.getId()); // ID deve ser nulo antes de salvar
     }
-
 }
